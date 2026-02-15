@@ -16,6 +16,11 @@ import edu.bu.pas.pacman.routing.BoardRouter.ExtraParams;
 import edu.bu.pas.pacman.utils.Coordinate;
 import edu.bu.pas.pacman.utils.Pair;
 
+import java.util.ArrayList;
+import java.util.HashSet;       // will need for bfs
+import java.util.Queue;         // will need for bfs
+import java.util.LinkedList;    // will need for bfs
+import java.util.Set;
 
 // This class is responsible for calculating routes between two Coordinates on the Map.
 // Use this in your PacmanAgent to calculate routes that (if followed) will lead
@@ -49,8 +54,13 @@ public class ThriftyBoardRouter
                                                        final GameView game,
                                                        final ExtraParams params)
     {
-        // TODO: implement me!
-        return null;
+        final Collection<Coordinate> neighbors = new ArrayList<>(4);
+        for (final Action a : Action.values()) {
+            if (game.isLegalPacmanMove(src,a)) {
+                neighbors.add(a.apply(src));
+            }
+        }
+        return neighbors;
     }
 
     @Override
@@ -58,7 +68,30 @@ public class ThriftyBoardRouter
                                         final Coordinate tgt,
                                         final GameView game)
     {
-        // TODO: implement me!
+        if (src.equals(tgt)) {
+            return new Path<>(src);
+        }
+
+        final Queue<Path<Coordinate>> q = new LinkedList<>();
+        final Set<Coordinate> visited = new HashSet<>();
+
+        q.add(new Path<>(src));
+        visited.add(src);
+
+        while (!q.isEmpty()) {
+            final Path<Coordinate> curPath = q.remove();
+            final Coordinate cur = curPath.getDestination();
+
+            if (cur.equals(tgt)) {
+                return curPath;
+            }
+
+            for (final Coordinate nbr : getOutgoingNeighbors(cur, game, new BoardExtraParams())) {
+                if (visited.add(nbr)) {
+                    q.add(new Path<>(nbr, 1.0f, curPath));
+                }
+            }
+        }
         return null;
     }
 
