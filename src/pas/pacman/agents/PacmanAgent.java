@@ -15,6 +15,9 @@ import edu.bu.pas.pacman.utils.Pair;
 
 import java.util.Random;
 import java.util.Set;
+import java.util.Stack;
+import edu.bu.pas.pacman.game.entity.Entity;
+import edu.bu.pas.pacman.game.Tile;
 
 
 // JAVA PROJECT IMPORTS
@@ -48,20 +51,93 @@ public class PacmanAgent
     @Override
     public void makePlan(final GameView game)
     {
-        // TODO: implement me! This method is responsible for calculating
-        // the "plan" of Coordinates you should visit in order to get from a starting
-        // location and another ending location. I recommend you use
-        // this.getBoardRouter().graphSearch(...) to get a path and convert it into
-        // a Stack of Coordinates (see the documentation for SearchAgent)
-        // which your makeMove can do something with!
+        final Coordinate tgt = this.getTargetCoordinate();
+        if (tgt == null) {
+            this.setPlanToGetToTarget(null);
+            return;
+        }
+
+        final Entity pac = game.getEntity(this.getMyEntityId());
+        final Coordinate src = pac.getCurrentCoordinate();
+
+        final Path<Coordinate> path =
+            this.getBoardRouter().graphSearch(src, tgt, game);
+
+        if (path == null) {
+            this.setPlanToGetToTarget(null);
+            return;
+        }
+
+        final Stack<Coordinate> plan = new Stack<>();
+        for (Path<Coordinate> p = path; p != null; p = p.getParentPath()) {
+            plan.push(p.getDestination());
+        }
+
+        if (!plan.isEmpty() && plan.peek().equals(src)) {
+            plan.pop();
+        }
+
+        this.setPlanToGetToTarget(plan);
     }
 
     @Override
     public Action makeMove(final GameView game)
     {
-        // This is currently configured to choose a random action
-        // TODO: change me!
-        return Action.values()[this.getRandom().nextInt(Action.values().length)];
+        final Entity pac = game.getEntity(this.getMyEntityId());
+        final Coordinate cur = pac.getCurrentCoordinate();
+
+        Stack<Coordinate> plan = this.getPlanToGetToTarget();
+
+        if (this.getTargetCoordinate() == null || plan == null || plan.isEmpty())
+        {
+            Coordinate bestPellet = null;
+            int bestDist = Integer.MAX_VALUE;
+
+            for (int x = 0; x < game.getXBoardDimension(); x++) {
+                for (int y = 0; y < game.getYBoardDimension(); y++) {
+                    final Coordinate c = new Coordinate(x, y);
+                    if (game.getTile(c).getState() == Tile.State.PELLET) {
+                        final int d = Math.abs(x - cur.x()) + Math.abs(y - cur.y());
+                        if (d < bestDist) {
+                            bestDist = d;
+                            bestPellet = c;
+                        }
+                    }
+                }
+            }
+
+            if (bestPellet == null) {
+                for (Action a : Action.values()) {
+                    if (game.isLegalPacmanMove(cur, a)) return a;
+                }
+                return Action.UP;
+            }
+
+            this.setTargetCoordinate(bestPellet);
+            this.makePlan(game);
+            plan = this.getPlanToGetToTarget();
+
+            if (plan == null || plan.isEmpty()) {
+                for (Action a : Action.values()) {
+                    if (game.isLegalPacmanMove(cur, a)) return a;
+                }
+                return Action.UP;
+            }
+        }
+
+        final Coordinate next = plan.pop();
+        this.setPlanToGetToTarget(plan);
+
+        try {
+            final Action a = Action.inferFromCoordinates(cur, next);
+            if (game.isLegalPacmanMove(cur, a)) return a;
+        } catch (Exception ignored) { }
+
+        for (Action a : Action.values()) {
+            if (game.isLegalPacmanMove(cur, a)) return a;
+        }
+        return Action.UP;
+
     }
 
     @Override
