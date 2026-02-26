@@ -4,6 +4,7 @@ package src.pas.pacman.agents;
 import edu.bu.pas.pacman.agents.Agent;
 import edu.bu.pas.pacman.agents.SearchAgent;
 import edu.bu.pas.pacman.game.Action;
+import edu.bu.pas.pacman.game.Tile;
 import edu.bu.pas.pacman.game.Game.GameView;
 import edu.bu.pas.pacman.graph.Path;
 import edu.bu.pas.pacman.graph.PelletGraph.PelletVertex;
@@ -50,19 +51,88 @@ public class PacmanAgent
 
     @Override
     public void makePlan(final GameView game) {
-        // TODO: implement me! This method is responsible for calculating
-        // the "plan" of Coordinates you should visit in order to get from a starting
-        // location and another ending location. I recommend you use
-        // this.getBoardRouter().graphSearch(...) to get a path and convert it into
-        // a Stack of Coordinates (see the documentation for SearchAgent)
-        // which your makeMove can do something with!
+
+        Coordinate src = game.getEntity(this.getMyEntityId()).getCurrentCoordinate();
+
+        Coordinate closestPellet = null;
+        float bestDistance = Float.POSITIVE_INFINITY;
+
+        // Scan board for pellets
+        for (int x = 0; x < game.getXBoardDimension(); x++) {
+            for (int y = 0; y < game.getYBoardDimension(); y++) {
+
+                Coordinate c = new Coordinate(x, y);
+
+                if (game.getTile(c).getState() == Tile.State.PELLET) {
+
+                    // Manhattan distance for target selection
+                    float dist = Math.abs(src.x() - x)
+                            + Math.abs(src.y() - y);
+
+                    if (dist < bestDistance) {
+                        bestDistance = dist;
+                        closestPellet = c;
+                    }
+                }
+            }
+        }
+
+        // No pellets remaining
+        if (closestPellet == null) {
+            this.setPlanToGetToTarget(null);
+            this.setTargetCoordinate(null);
+            return;
+        }
+
+        this.setTargetCoordinate(closestPellet);
+
+        Path<Coordinate> path = this.getBoardRouter().graphSearch(src, closestPellet, game);
+
+        if (path == null) {
+            this.setPlanToGetToTarget(null);
+            return;
+        }
+
+        java.util.Stack<Coordinate> stack = new java.util.Stack<>();
+
+        // Convert reversed Path into forward stack
+        Path<Coordinate> current = path;
+
+        while (current.getParentPath() != null) {
+            stack.push(current.getDestination());
+            current = current.getParentPath();
+        }
+
+        this.setPlanToGetToTarget(stack);
     }
 
     @Override
     public Action makeMove(final GameView game) {
-        // This is currently configured to choose a random action
-        // TODO: change me!
-        return Action.values()[this.getRandom().nextInt(Action.values().length)];
+
+        // If no plan exists or plan is finished → create one
+        if (this.getPlanToGetToTarget() == null
+                || this.getPlanToGetToTarget().isEmpty()) {
+
+            this.makePlan(game);
+        }
+
+        // If still no plan, do nothing safe
+        if (this.getPlanToGetToTarget() == null
+                || this.getPlanToGetToTarget().isEmpty()) {
+
+            return Action.UP; // fallback safe move
+        }
+
+        Coordinate current = game.getEntity(this.getMyEntityId()).getCurrentCoordinate();
+
+        Coordinate next = this.getPlanToGetToTarget().pop();
+
+        try {
+            return Action.inferFromCoordinates(current, next);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return Action.UP;
+        }
     }
 
     @Override
