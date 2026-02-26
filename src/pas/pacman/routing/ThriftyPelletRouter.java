@@ -7,14 +7,10 @@ import edu.bu.pas.pacman.graph.Path;
 import edu.bu.pas.pacman.graph.PelletGraph.PelletVertex;
 import edu.bu.pas.pacman.routing.PelletRouter;
 import edu.bu.pas.pacman.utils.Coordinate;
-import edu.bu.pas.pacman.game.Tile;
 
 public class ThriftyPelletRouter extends PelletRouter {
 
-    public static class PelletExtraParams extends ExtraParams {
-    }
-
-    private GameView currentGame;
+    public static class PelletExtraParams extends ExtraParams { }
 
     public ThriftyPelletRouter(int myUnitId,
                                int pacmanId,
@@ -37,15 +33,21 @@ public class ThriftyPelletRouter extends PelletRouter {
         return neighbors;
     }
 
+    // Euclidean distance instead of Manhattan
+    private float euclidean(Coordinate a, Coordinate b) {
+        float dx = a.x() - b.x();
+        float dy = a.y() - b.y();
+        return (float) Math.sqrt(dx * dx + dy * dy);
+    }
+
     @Override
     public float getEdgeWeight(final PelletVertex src,
                                final PelletVertex dst,
                                final ExtraParams params) {
 
-        Coordinate from = src.getPacmanCoordinate();
-        Coordinate to   = dst.getPacmanCoordinate();
-
-        return shortestPathDistance(from, to);
+        return euclidean(
+                src.getPacmanCoordinate(),
+                dst.getPacmanCoordinate());
     }
 
     @Override
@@ -58,77 +60,17 @@ public class ThriftyPelletRouter extends PelletRouter {
         }
 
         Coordinate pac = src.getPacmanCoordinate();
-        float minDist = Float.MAX_VALUE;
+        float min = Float.MAX_VALUE;
 
         for (Coordinate pellet : src.getRemainingPelletCoordinates()) {
-            float d = shortestPathDistance(pac, pellet);
-            minDist = Math.min(minDist, d);
+            min = Math.min(min, euclidean(pac, pellet));
         }
 
-        return minDist;
-    }
-
-    private Collection<Coordinate> getNeighbors(Coordinate c) {
-
-        List<Coordinate> neighbors = new ArrayList<>();
-
-        int[][] dirs = { {1,0}, {-1,0}, {0,1}, {0,-1} };
-
-        for (int[] d : dirs) {
-            Coordinate next = new Coordinate(c.x() + d[0], c.y() + d[1]);
-
-            if (next.x() >= 0 &&
-                next.y() >= 0 &&
-                next.x() < currentGame.getXBoardDimension() &&
-                next.y() < currentGame.getYBoardDimension() &&
-                currentGame.getTile(next).getState() != Tile.State.WALL) {
-
-                neighbors.add(next);
-            }
-        }
-
-        return neighbors;
-    }
-
-    private int shortestPathDistance(Coordinate start,
-                                     Coordinate goal) {
-
-        if (start.equals(goal)) {
-            return 0;
-        }
-
-        Queue<Coordinate> queue = new LinkedList<>();
-        Map<Coordinate, Integer> dist = new HashMap<>();
-
-        queue.add(start);
-        dist.put(start, 0);
-
-        while (!queue.isEmpty()) {
-
-            Coordinate cur = queue.poll();
-            int curDist = dist.get(cur);
-
-            for (Coordinate neighbor : getNeighbors(cur)) {
-
-                if (!dist.containsKey(neighbor)) {
-
-                    if (neighbor.equals(goal)) {
-                        return curDist + 1;
-                    }
-
-                    dist.put(neighbor, curDist + 1);
-                    queue.add(neighbor);
-                }
-            }
-        }
-
-        return Integer.MAX_VALUE;
+        return min;
     }
 
     @Override
     public Path<PelletVertex> graphSearch(final GameView game) {
-
-        this.currentGame = game;
 
         PelletVertex start = new PelletVertex(game);
 
@@ -149,37 +91,27 @@ public class ThriftyPelletRouter extends PelletRouter {
 
             Path<PelletVertex> currentPath = frontier.poll();
             PelletVertex current = currentPath.getDestination();
-            float currentCost = currentPath.getTrueCost();
+            float g = currentPath.getTrueCost();
 
             if (current.getRemainingPelletCoordinates().isEmpty()) {
                 return currentPath;
             }
 
-            if (bestCost.containsKey(current) &&
-                currentCost > bestCost.get(current)) {
+            if (g > bestCost.getOrDefault(current, Float.MAX_VALUE)) {
                 continue;
             }
 
             for (PelletVertex neighbor :
                  getOutgoingNeighbors(current, game, null)) {
 
-                float edgeCost =
-                    shortestPathDistance(
-                        current.getPacmanCoordinate(),
-                        neighbor.getPacmanCoordinate()
-                    );
+                float edge = getEdgeWeight(current, neighbor, null);
+                float newCost = g + edge;
 
-                float newCost = currentCost + edgeCost;
-
-                if (!bestCost.containsKey(neighbor) ||
-                    newCost < bestCost.get(neighbor)) {
+                if (newCost <
+                    bestCost.getOrDefault(neighbor, Float.MAX_VALUE)) {
 
                     bestCost.put(neighbor, newCost);
-
-                    Path<PelletVertex> newPath =
-                        new Path<>(neighbor, edgeCost, currentPath);
-
-                    frontier.add(newPath);
+                    frontier.add(new Path<>(neighbor, edge, currentPath));
                 }
             }
         }
