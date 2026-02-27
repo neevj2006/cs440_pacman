@@ -15,7 +15,8 @@ import edu.bu.pas.pacman.game.Action;
 
 public class ThriftyPelletRouter extends PelletRouter {
 
-    private Map<Coordinate, Map<Coordinate, Integer>> distCache;
+    private Map<Coordinate, Map<Coordinate, Integer>> distCache = new HashMap<>();
+    private GameView cachedGame;
 
     public ThriftyPelletRouter(int myUnitId,
             int pacmanId,
@@ -56,7 +57,7 @@ public class ThriftyPelletRouter extends PelletRouter {
             GameView game) {
 
         Map<Coordinate, Integer> dist = new HashMap<>();
-        Queue<Coordinate> q = new LinkedList<>();
+        Queue<Coordinate> q = new ArrayDeque<>();
 
         dist.put(start, 0);
         q.add(start);
@@ -83,6 +84,23 @@ public class ThriftyPelletRouter extends PelletRouter {
         return dist;
     }
 
+    private void ensureBfs(Coordinate src, GameView game) {
+        if (src == null) return;
+        if (distCache == null) distCache = new HashMap<>();
+        if (!distCache.containsKey(src)) {
+            distCache.put(src, bfsFrom(src, game));
+        }
+    }
+
+    private Map<Coordinate, Integer> bfsCached(Coordinate src, GameView game) {
+        return distCache.computeIfAbsent(src, k -> bfsFrom(k, game));
+    }
+
+    private int dist(Coordinate from, Coordinate to, GameView game) {
+        Integer d = bfsCached(from, game).get(to);
+        return (d == null) ? Integer.MAX_VALUE / 4 : d;
+    }
+
     @Override
     public float getEdgeWeight(final PelletVertex src,
             final PelletVertex dst,
@@ -91,80 +109,80 @@ public class ThriftyPelletRouter extends PelletRouter {
         Coordinate from = src.getPacmanCoordinate();
         Coordinate to = dst.getPacmanCoordinate();
 
-        return distCache.get(from).get(to);
+        if (cachedGame == null) return Float.MAX_VALUE;
+        ensureBfs(from, cachedGame);
+
+        Integer d = distCache.get(from).get(to);
+        return (d == null) ? Float.MAX_VALUE : d;
     }
 
     @Override
     public float getHeuristic(final PelletVertex src,
-                          final GameView game,
-                          final ExtraParams params) {
+                            final GameView game,
+                            final ExtraParams params) {
 
-        if (src.getRemainingPelletCoordinates().isEmpty()) return 0f;
-
-        if (distCache == null) distCache = new HashMap<>();
+        Collection<Coordinate> rem = src.getRemainingPelletCoordinates();
+        if (rem.isEmpty()) return 0f;
 
         Coordinate pac = src.getPacmanCoordinate();
-
-        if (!distCache.containsKey(pac)) {
-            distCache.put(pac, bfsFrom(pac, game));
-        }
-
-        Map<Coordinate, Integer> pacDists = distCache.get(pac);
+        Map<Coordinate, Integer> pacMap = bfsCached(pac, game);
 
         int best = Integer.MAX_VALUE;
-        for (Coordinate pellet : src.getRemainingPelletCoordinates()) {
-            Integer d = pacDists.get(pellet);
-            if (d != null) best = Math.min(best, d);
+        for (Coordinate pellet : rem) {
+            Integer d = pacMap.get(pellet);
+            if (d != null && d < best) best = d;
         }
-
         return (best == Integer.MAX_VALUE) ? 0f : best;
+    }
+
+    private static class Node {
+        final Path<PelletVertex> path;
+        final float f;
+        Node(Path<PelletVertex> path, float f) {
+            this.path = path;
+            this.f = f;
+        }
     }
 
     @Override
     public Path<PelletVertex> graphSearch(final GameView game) {
 
+        distCache.clear(); // important: new search/game tick
+
         PelletVertex start = new PelletVertex(game);
 
-        // Build cache ONCE
-        buildDistanceCache(game, start);
+        PriorityQueue<Node> frontier = new PriorityQueue<>(Comparator.comparingDouble(n -> n.f));
+        Map<PelletVertex, Float> bestG = new HashMap<>();
+        Map<PelletVertex, Float> hMemo = new HashMap<>(); // optional but helps a lot
 
-        PriorityQueue<Path<PelletVertex>> frontier = new PriorityQueue<>(
-                Comparator.comparingDouble(p -> p.getTrueCost() +
-                        getHeuristic(p.getDestination(), game, null)));
-
-        Map<PelletVertex, Float> bestCost = new HashMap<>();
-
-        frontier.add(new Path<>(start));
-        bestCost.put(start, 0f);
+        float h0 = hMemo.computeIfAbsent(start, v -> getHeuristic(v, game, null));
+        frontier.add(new Node(new Path<>(start), h0));
+        bestG.put(start, 0f);
 
         while (!frontier.isEmpty()) {
 
-            Path<PelletVertex> currentPath = frontier.poll();
-            PelletVertex current = currentPath.getDestination();
-            float g = currentPath.getTrueCost();
+            Node curNode = frontier.poll();
+            Path<PelletVertex> curPath = curNode.path;
+            PelletVertex cur = curPath.getDestination();
+            float g = curPath.getTrueCost();
 
-            if (current.getRemainingPelletCoordinates().isEmpty()) {
-                return currentPath;
-            }
+            if (cur.getRemainingPelletCoordinates().isEmpty()) return curPath;
+            if (g > bestG.getOrDefault(cur, Float.MAX_VALUE)) continue;
 
-            if (g > bestCost.getOrDefault(current, Float.MAX_VALUE)) {
-                continue;
-            }
+            for (PelletVertex nb : getOutgoingNeighbors(cur, game, null)) {
 
-            for (PelletVertex neighbor : getOutgoingNeighbors(current, game, null)) {
+                float edge = dist(cur.getPacmanCoordinate(), nb.getPacmanCoordinate(), game);
+                float g2 = g + edge;
 
-                float edge = getEdgeWeight(current, neighbor, null);
-                float newCost = g + edge;
+                if (g2 < bestG.getOrDefault(nb, Float.MAX_VALUE)) {
+                    bestG.put(nb, g2);
 
-                if (newCost < bestCost.getOrDefault(neighbor, Float.MAX_VALUE)) {
-
-                    bestCost.put(neighbor, newCost);
-                    frontier.add(
-                            new Path<>(neighbor, edge, currentPath));
+                    Path<PelletVertex> nbPath = new Path<>(nb, edge, curPath);
+                    float h = hMemo.computeIfAbsent(nb, v -> getHeuristic(v, game, null));
+                    frontier.add(new Node(nbPath, g2 + h));
                 }
             }
         }
-
         return null;
     }
 }
